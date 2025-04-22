@@ -1,0 +1,1 @@
+# Scout Sentinel Integration

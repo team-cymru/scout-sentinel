@@ -7,3 +7,5 @@ Scout's certified integration seamlessly integrates with Microsoft Sentinel, del
 You can find our Sentinel app on the Azure Marketplace here: [Team Cymru Scout in the Azure Marketplace](https://azuremarketplace.microsoft.com/en-en/marketplace/apps/team-cymru.teamcymruscout_sentinel) 
 
 Documentation for Installation, Usage and Troubleshooting can be found in our [User Guide](https://github.com/team-cymru/scout-sentinel/blob/main/Documentation/Team%20Cymru%20Scout%20for%20Microsoft%20Sentinel%20Installation%2C%20Usage%20and%20Troubleshooting%20User%20Guide.pdf)
+
+To install the Scout Sentinel integration manually, you can download the ZIP file in the [Installation Package](https://github.com/team-cymru/scout-sentinel/tree/main/Manual%20Installation/Installation%20Package) Folder under our [Manual Installation](https://github.com/team-cymru/scout-sentinel/tree/main/Manual%20Installation) Directory in this Github repo.

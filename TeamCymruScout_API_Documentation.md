@@ -16,11 +16,10 @@
    - [GET /api/scout/search](#get-apiscoutsearch)
    - [GET /api/scout/ip/{ip}/details](#get-apiscoutipipdetails)
    - [GET /api/scout/ip/foundation](#get-apiscoutipfoundation)
-5. [Data Schema](#data-schema)
-6. [Pagination](#pagination)
-7. [Incremental Pull (Date-Based Filtering)](#incremental-pull-date-based-filtering)
-8. [Error Responses](#error-responses)
-9. [CCF API Poller Connector Configuration](#ccf-api-poller-connector-configuration)
+5. [Pagination](#pagination)
+6. [Incremental Pull](#incremental-pull)
+7. [Error Responses](#error-responses)
+8. [CCF API Poller Connector Configuration](#ccf-api-poller-connector-configuration)
 
 ---
 
@@ -35,7 +34,7 @@ passive DNS (PDNS), X.509 certificates, fingerprints, and whois information.
 | Data format | JSON |
 | Authentication | API Key (header) or HTTP Basic Auth |
 | Pagination | None (single response per request) |
-| Incremental pull | `start_date` / `end_date` query parameters (YYYY-MM-DD) |
+| Incremental pull | Optional `start_date` / `end_date` parameters (YYYY-MM-DD). When omitted, the API defaults to a 30-day observation window. |
 | Rate limiting | Monthly search balance; searches are metered |
 
 ---
@@ -90,35 +89,45 @@ For CCF connector development, use the **APIKey** auth type:
 
 ## Endpoints
 
+The Scout API has four primary endpoints. The existing Sentinel connector polls these
+on a schedule: IP and Domain data daily at midnight UTC, Account Usage data hourly.
+
 ### GET /api/scout/usage
 
 Returns account usage statistics including remaining search balance.
 
 **URL:** `GET /api/scout/usage`
 
-#### Response -- 200 OK
+**Query Parameters:** None required.
 
-<!-- TODO: Document the exact response schema for /api/scout/usage -->
-<!-- This endpoint returns account usage data including monthly search balance -->
+#### Response -- 200 OK
 
 ```json
 {
-  "query_count": 150,
+  "used_queries": 150,
+  "remaining_queries": 850,
   "query_limit": 1000,
-  "period_start": "2026-09-01",
-  "period_end": "2026-09-30"
+  "foundation_api_usage": {
+    "used_queries": 50,
+    "remaining_queries": 450,
+    "query_limit": 500
+  },
+  "ai_insights_usage": {
+    "used_queries": 10,
+    "remaining_queries": 90,
+    "query_limit": 100
+  }
 }
 ```
 
-> **Note:** The above response schema is approximate. Verify the exact field names and
-> structure against a live API response.
+**Events JSON Path:** `$` (the root object is the single record; wrap in array for ingestion)
 
 ---
 
 ### GET /api/scout/search
 
-Executes an advanced search query using the Scout Query Language. Returns a multi-view
-result set of IPs matching the query criteria.
+Executes an advanced search query using the Scout Query Language. Returns IPs matching
+the query criteria along with enrichment data.
 
 **URL:** `GET /api/scout/search`
 
@@ -126,46 +135,40 @@ result set of IPs matching the query criteria.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `query` | string | **Yes** | A Scout Query Language expression. See [Search Types and Fields](#search-types-and-fields) below. |
-| `start_date` | string (YYYY-MM-DD) | No | Return only data observed on or after this date. Used for incremental/delta pulls. |
-| `end_date` | string (YYYY-MM-DD) | No | Return only data observed on or before this date. |
-
-<!-- TODO: Verify the exact parameter names for date filtering on the search endpoint. -->
-<!-- The parameter names may differ from start_date/end_date. Check the live API. -->
+| `query` | string | **Yes** | A Scout Query Language expression (e.g., `ip=93.184.216.34` or `pdns.domain="*.example.com"`). |
+| `start_date` | string (YYYY-MM-DD) | No | Start of observation window. Defaults to 30 days ago if omitted. |
+| `end_date` | string (YYYY-MM-DD) | No | End of observation window. Defaults to today if omitted. |
 
 #### Request Example
 
 ```http
-GET /api/scout/search?query=ip=93.184.216.34&start_date=2026-09-01&end_date=2026-09-09 HTTP/1.1
+GET /api/scout/search?query=example.com HTTP/1.1
 Host: scout.cymru.com
 Authorization: Token: your-api-key-here
 ```
 
 #### Response -- 200 OK
 
-<!-- TODO: Document the exact response schema for /api/scout/search -->
-<!-- The response contains a list of IP results matching the query criteria -->
-
 ```json
 {
-  "data": [
+  "query": "example.com",
+  "start_date": "2026-08-10",
+  "end_date": "2026-09-09",
+  "ips": [
     {
       "ip": "93.184.216.34",
-      "as_name": "EDGECAST",
-      "asn": 15133,
-      "cc": "US",
-      "tags": ["cdn"],
-      "start_date": "2026-09-01",
-      "end_date": "2026-09-09"
+      "country_codes": ["US"],
+      "as_info": {},
+      "tags": [],
+      "event_count": 42,
+      "summary": {},
+      "comms_enrichment": {}
     }
-  ],
-  "query": "ip=93.184.216.34",
-  "status": "success"
+  ]
 }
 ```
 
-> **Note:** The above response schema is approximate. Verify the exact field names,
-> structure, and nesting against a live API response.
+**Events JSON Path:** `$.ips[*]`
 
 ---
 
@@ -186,10 +189,16 @@ PDNS, open ports, X.509 certificates, fingerprints, and whois data.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `start_date` | string (YYYY-MM-DD) | No | Start of observation window. |
-| `end_date` | string (YYYY-MM-DD) | No | End of observation window. |
+| `start_date` | string (YYYY-MM-DD) | No | Start of observation window. Defaults to 30 days ago if omitted. |
+| `end_date` | string (YYYY-MM-DD) | No | End of observation window. Defaults to today if omitted. |
 
-<!-- TODO: Verify the exact parameter names for date filtering on the details endpoint. -->
+#### Request Example
+
+```http
+GET /api/scout/ip/93.184.216.34/details HTTP/1.1
+Host: scout.cymru.com
+Authorization: Token: your-api-key-here
+```
 
 #### Response -- 200 OK
 
@@ -198,38 +207,93 @@ The response contains detailed data organized by section:
 ```json
 {
   "ip": "93.184.216.34",
-  "start_date": "2026-09-01",
+  "start_date": "2026-08-10",
   "end_date": "2026-09-09",
   "request_id": "req-abc123",
   "sections": ["summary", "communications", "pdns", "open_ports", "x509", "fingerprints", "whois"],
+  "identity": {
+    "asn": 15133,
+    "as_name": "EDGECAST",
+    "net_name": "EDGECAST-NETBLK-01",
+    "org_name": "Edgecast Inc.",
+    "tags": [],
+    "reverse_hostnames": []
+  },
+  "whois": {
+    "asn": 15133,
+    "modified": "2012-06-22",
+    "cidr": "93.184.216.0/24",
+    "as_name": "EDGECAST",
+    "bgp_asn": 15133,
+    "bgp_asn_name": "EDGECAST",
+    "net_name": "EDGECAST-NETBLK-01",
+    "net_handle": "NET-93-184-216-0-1",
+    "description": "",
+    "cc": "US",
+    "city": "",
+    "address": ""
+  },
+  "communications": {
+    "event_count": 100,
+    "peers": [
+      { "ip": "1.2.3.4", "event_count": 10 }
+    ]
+  },
+  "pdns": {
+    "event_count": 50,
+    "pdns": [
+      { "domain": "example.com", "type": "A", "event_count": 25 }
+    ]
+  },
+  "fingerprints": {
+    "event_count": 5,
+    "fingerprints": [
+      { "hash": "abc123", "fingerprints_type": "jarm", "port": 443 }
+    ]
+  },
+  "open_ports": {
+    "event_count": 10,
+    "unique_ports": 3,
+    "open_ports": [
+      { "port": 443, "service": "https", "banner": "" }
+    ]
+  },
+  "x509": {
+    "event_count": 2,
+    "x509": [
+      { "subject": "CN=example.com", "issuer": "CN=DigiCert" }
+    ]
+  },
   "summary": {
     "tags": [],
+    "reverse_hostnames": [],
+    "whois": {},
+    "total": 167,
+    "geo_ip_cc": "US",
+    "bgp_asn": 15133,
+    "bgp_asname": "EDGECAST",
+    "insights": {},
     "pdns": { "top_pdns": [] },
     "open_ports": { "top_open_ports": [] },
     "certs": { "top_certs": [] },
-    "fingerprints": { "top_fingerprints": [] }
-  },
-  "communications": {
-    "peers": []
-  },
-  "pdns": {
-    "pdns": []
-  },
-  "open_ports": {
-    "open_ports": []
-  },
-  "x509": {
-    "x509": []
-  },
-  "fingerprints": {
-    "fingerprints": []
-  },
-  "whois": {}
+    "fingerprints": { "top_fingerprints": [] },
+    "tag_timeline": {}
+  }
 }
 ```
 
-> **Note:** The above response schema is derived from the existing connector source code.
-> Verify the exact structure against a live API response.
+**Events JSON Path:** `$` (the root object is the single record; the existing connector wraps it in `[ip_data]` before ingestion)
+
+**Sub-record paths** (for splitting into separate tables, as the existing connector does):
+- Communications peers: `$.communications.peers[*]`
+- PDNS records: `$.pdns.pdns[*]`
+- Fingerprints: `$.fingerprints.fingerprints[*]`
+- Open ports: `$.open_ports.open_ports[*]`
+- X.509 certificates: `$.x509.x509[*]`
+- Summary PDNS: `$.summary.pdns.top_pdns[*]`
+- Summary open ports: `$.summary.open_ports.top_open_ports[*]`
+- Summary certs: `$.summary.certs.top_certs[*]`
+- Summary fingerprints: `$.summary.fingerprints.top_fingerprints[*]`
 
 ---
 
@@ -244,15 +308,13 @@ Returns foundation-level IP data for one or more IP addresses.
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `ips` | string | **Yes** | Comma-separated list of IP addresses (max 10 per request). |
-| `start_date` | string (YYYY-MM-DD) | No | Start of observation window. |
-| `end_date` | string (YYYY-MM-DD) | No | End of observation window. |
-
-<!-- TODO: Verify the exact parameter names and limits for the foundation endpoint. -->
+| `start_date` | string (YYYY-MM-DD) | No | Start of observation window. Defaults to 30 days ago if omitted. |
+| `end_date` | string (YYYY-MM-DD) | No | End of observation window. Defaults to today if omitted. |
 
 #### Request Example
 
 ```http
-GET /api/scout/ip/foundation?ips=93.184.216.34,104.18.213.12&start_date=2026-09-01&end_date=2026-09-09 HTTP/1.1
+GET /api/scout/ip/foundation?ips=93.184.216.34,104.18.213.12 HTTP/1.1
 Host: scout.cymru.com
 Authorization: Token: your-api-key-here
 ```
@@ -264,75 +326,90 @@ Authorization: Token: your-api-key-here
   "data": [
     {
       "ip": "93.184.216.34",
-      "as_name": "EDGECAST",
-      "asn": 15133,
-      "cc": "US",
-      "tags": ["cdn"],
-      "tags_id": [],
-      "tags_name": []
+      "country_code": "US",
+      "as_info": {
+        "asn": 15133,
+        "as_name": "EDGECAST"
+      },
+      "tags": [
+        { "id": "cdn", "name": "CDN" }
+      ],
+      "insights": {
+        "overall_rating": "no_rating",
+        "insights": []
+      }
     }
   ]
 }
 ```
 
-> **Note:** The above response schema is approximate. Verify against a live API response.
+**Events JSON Path:** `$.data[*]`
 
 ---
 
 ## Search Types and Fields
 
-The Scout search endpoint supports the following query selectors:
+The Scout search endpoint (`/api/scout/search`) supports a query language with the following selectors:
 
-| Selector | Wildcard | Description |
-|---|---|---|
-| `asn` | No | Search by ASN |
-| `cc` | No | Search by country code |
-| `ip` | No | Search by IP address or CIDR |
-| `tag` | No | Search by tags |
-| `comms.ip` | No | Search by communication peer IP |
-| `comms.port` | No | Search by communication port |
-| `comms.proto` | No | Search by communication protocol |
-| `comms.tag` | No | Search by communication peer tag |
-| `openports.port` | No | Search by open port |
-| `openports.banner` | Yes | Search by banner text |
-| `openports.service` | No | Search by service name |
-| `pdns.domain` | Yes | Search by domain name |
-| `pdns.nameserver` | No | Search by DNS nameserver |
-| `pdns.registrar` | Yes | Search by domain registrar |
-| `x509.subject.cn` | Yes | Search by certificate subject common name |
-| `x509.issuer` | Yes | Search by certificate issuer |
-| `fingerprints.hash` | No | Search by fingerprint hash |
-| `fingerprints.type` | No | Search by fingerprint type (jarm, ja3s, ja3, etc.) |
+| Selector | Wildcard | Description | Examples |
+|---|---|---|---|
+| `asn` | No | Search by ASN | `123`, `123,456` |
+| `cc` | No | Search by country code | `US`, `US,DE` |
+| `ip` | No | Search by IP or CIDR | `93.184.216.34`, `93.184.216.0/24` |
+| `tag` | No | Search by tags | `scanner`, `cloud,router` |
+| `comms.ip` | No | Communication peer IP | `93.184.216.34` |
+| `comms.port` | No | Communication port | `80`, `80,8080` |
+| `comms.proto` | No | Communication protocol | `6`, `6,7` |
+| `comms.count` | No | Communication event count | `1`, `100` |
+| `openports.port` | No | Open port number | `443,80` |
+| `openports.banner` | Yes | Banner text | `nginx`, `*Referrer-Policy*` |
+| `openports.service` | No | Service name | `http`, `ssh` |
+| `pdns.domain` | Yes | Domain name | `google.com`, `*.jquery.com` |
+| `pdns.nameserver` | No | DNS nameserver | `ns1.example.com` |
+| `pdns.registrar` | Yes | Domain registrar | `Dynadot LLC` |
+| `pdns.count` | No | PDNS event count | `1`, `100` |
+| `x509.subject.cn` | Yes | Certificate subject CN | `sni.cloudflaressl.com` |
+| `x509.issuer` | Yes | Certificate issuer | `DigiCert Inc` |
+| `x509.sha256` | No | Certificate SHA256 | `8b396e40...` |
+| `fingerprints.hash` | No | Fingerprint hash | `eb1d94daa7e0...` |
+| `fingerprints.type` | No | Fingerprint type | `jarm`, `ja3s`, `ja3`, `hassh` |
+| `meta.asn` | No | ASN across all search types | `123` |
+| `meta.cc` | No | Country code across all types | `US` |
+| `meta.tag` | No | Tags across all search types | `scanner` |
 
-> **Note:** This is a subset of the full query language. See the Scout documentation
-> for the complete list of selectors and operators (`=`, `!=`, `<`, `>`, `<=`, `>=`).
+**Operators:** All selectors support `=` and `!=`. Count selectors additionally support `<`, `<=`, `>`, `>=`.
+
+**Wildcards:** Supported on indicated fields using `*` character.
 
 ---
 
 ## Pagination
 
 The Scout API does **not** implement pagination. All results for a given request are
-returned in a single response.
+returned in a single response. No pagination configuration is needed in the CCF connector.
 
 ---
 
-## Incremental Pull (Date-Based Filtering)
+## Incremental Pull
 
-The Scout API supports date-based filtering via `start_date` and `end_date` query parameters.
+The Scout API supports optional `start_date` and `end_date` query parameters on all
+data endpoints. These control the observation window for returned data.
 
 | Property | Value |
 |---|---|
 | Start time parameter | `start_date` |
 | End time parameter | `end_date` |
 | Date format | `YYYY-MM-DD` (date only, no time component) |
+| Default behavior (when omitted) | API returns data for the last 30 days |
 
-To perform incremental ingestion:
-1. On the initial pull, omit `start_date` and `end_date` (or set to the desired observation window).
-2. On subsequent polls, set `start_date` to the date of the last successful poll.
-3. Set `end_date` to the current date.
+**Existing connector behavior:** The current Azure Function connector omits both
+`start_date` and `end_date`, relying on the API's 30-day default window. It polls
+daily at midnight UTC (for IP/Domain data) and hourly (for Account Usage data).
+There is no deduplication — each poll re-fetches the full 30-day window.
 
-<!-- TODO: Verify that start_date and end_date are the exact parameter names accepted -->
-<!-- by all endpoints. Also verify the exact behavior when these parameters are omitted. -->
+**CCF recommendation:** Match the existing behavior by omitting `startTimeAttributeName`
+and `endTimeAttributeName` from the CCF request config. The CCF Poller will call the
+endpoint without date parameters, and the API will return its default 30-day window.
 
 ---
 
@@ -344,8 +421,9 @@ To perform incremental ingestion:
 | `401 Unauthorized` | Missing or incorrect authentication credentials. |
 | `403 Forbidden` | Authorization error (insufficient permissions). |
 | `404 Not Found` | Resource not found. |
-| `429 Too Many Requests` | Rate limit exceeded. |
+| `429 Too Many Requests` | Rate limit exceeded (monthly search balance exhausted). |
 | `500 Internal Server Error` | Server-side error. |
+| `503 Service Unavailable` | Service temporarily unavailable. |
 
 ---
 
@@ -365,69 +443,52 @@ To perform incremental ingestion:
 
 ### Request Configuration
 
+The existing connector polls three separate endpoints. The CCF migration may require
+multiple `RestApiPoller` connection rules:
+
+#### IP/Domain Data (daily polling)
+
 | CCF Setting | Value |
 |---|---|
 | HTTP Method | `GET` |
-| Base URL | `https://scout.cymru.com` |
-| Query Time Format | `yyyy-MM-dd` |
-| Start Time Attribute Name | `start_date` |
-| End Time Attribute Name | `end_date` |
-| Query Window In Min | `1440` (24 hours, since the API uses date-only granularity) |
+| API Endpoint | `https://scout.cymru.com/api/scout/search` (or `/api/scout/ip/foundation`) |
+| Query Window In Min | `1440` (24 hours, matching existing daily schedule) |
+| Retry Count | `3` |
+| Timeout In Seconds | `180` |
 
-<!-- TODO: The queryWindowInMin should match the date-only granularity of the API. -->
-<!-- Since the API uses YYYY-MM-DD format, a 1440-minute (24-hour) window makes sense. -->
-<!-- Verify this is the correct approach for the Scout API's polling behavior. -->
+> **Note:** No `startTimeAttributeName` or `endTimeAttributeName` is configured.
+> This matches the existing connector behavior: the API defaults to a 30-day
+> observation window when date parameters are omitted.
 
-### Response Parsing
+#### Account Usage Data (hourly polling)
 
 | CCF Setting | Value |
 |---|---|
-| Events JSON Path | `$.data[*]` |
-| Response Format | `json` |
+| HTTP Method | `GET` |
+| API Endpoint | `https://scout.cymru.com/api/scout/usage` |
+| Query Window In Min | `60` (1 hour, matching existing hourly schedule) |
+| Retry Count | `3` |
+| Timeout In Seconds | `60` |
 
-<!-- TODO: Verify the exact JSON path for the events array in each endpoint's response. -->
+### Response Parsing
+
+| Endpoint | Events JSON Path | Format |
+|---|---|---|
+| `/api/scout/ip/foundation` | `$.data[*]` | `json` |
+| `/api/scout/search` | `$.ips[*]` | `json` |
+| `/api/scout/ip/{ip}/details` | `$` | `json` |
+| `/api/scout/usage` | `$` | `json` |
 
 ### Pagination Configuration
 
-No pagination configuration is needed. Omit the `paging` section from the CCF connector config.
+No pagination configuration is needed. Omit the `paging` section entirely.
 
 ### Rate Limiting
 
 The Scout API uses monthly search balance metering. Each API call decrements the balance.
-Configure the CCF polling interval to respect the account's monthly query limit.
 
 | CCF Setting | Suggested Value |
 |---|---|
 | Rate Limit QPS | `1` (conservative; adjust based on account limits) |
 | Retry Count | `3` |
 | Timeout In Seconds | `180` |
-
----
-
-## Open Questions (TODO)
-
-The following items need verification against a live Scout API instance before the CCF
-Connector Builder Agent can generate production-ready config files:
-
-1. **Exact parameter names:** Confirm that `start_date` and `end_date` are the correct
-   query parameter names for all endpoints.
-
-2. **Response schemas:** The response JSON structures in this document are approximate,
-   derived from the existing Python connector source code. They need to be verified
-   against actual API responses.
-
-3. **Search endpoint for polling:** Determine which endpoint is best suited for periodic
-   CCF polling. Options:
-   - `/api/scout/ip/foundation` — requires a list of IPs as input
-   - `/api/scout/ip/{ip}/details` — requires a single IP as input
-   - `/api/scout/search` — accepts query language, may be most flexible for polling
-
-4. **Events JSON path:** Confirm the exact JSON path to the events/records array in each
-   endpoint's response (e.g., `$.data[*]`, `$.data`, `$`).
-
-5. **Query window behavior:** Verify how the API behaves when `start_date` equals
-   `end_date` (same-day query) and when date parameters are omitted entirely.
-
-6. **Multiple connection rules:** The existing Azure Function connector has 3 separate
-   collectors (IP, Domain, Account Usage). Determine whether the CCF migration needs
-   multiple `RestApiPoller` connection rules or a single one.

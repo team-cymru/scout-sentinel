@@ -1,0 +1,150 @@
+{
+  "name": "TeamCymruScout",
+  "id": "TeamCymruScout-API-FunctionApp",
+  "version": "1.0.0",
+  "publisher": "Team Cymru",
+  "title": "Team Cymru Scout API Poller",
+  "descriptionMarkdown": "This connector ingests Team Cymru Scout threat intelligence and account usage data into Microsoft Sentinel. It polls the Scout REST API using API key authentication, retrieves usage statistics, advanced search results, detailed IP enrichment, and foundation lookups, and writes the normalized records to custom Log Analytics tables.",
+  "logo": "<img src=\"https://raw.githubusercontent.com/Azure/Azure-Sentinel/master/Logos/TeamCymruScout.svg\" width=\"75px\" height=\"75px\">",
+  "graphQueries": [
+    {
+      "metricName": "TeamCymruScout Usage",
+      "legend": "TeamCymruScoutUsage",
+      "baseQuery": "TeamCymruScoutUsage | take 10"
+    },
+    {
+      "metricName": "TeamCymruScout Search",
+      "legend": "TeamCymruScoutSearch",
+      "baseQuery": "TeamCymruScoutSearch | take 10"
+    },
+    {
+      "metricName": "TeamCymruScout IP Details",
+      "legend": "TeamCymruScoutIPDetails",
+      "baseQuery": "TeamCymruScoutIPDetails | take 10"
+    }
+  ],
+  "sampleQueries": [
+    {
+      "description": "Show recent Team Cymru Scout usage statistics",
+      "query": "TeamCymruScoutUsage | top 20 by TimeGenerated desc"
+    },
+    {
+      "description": "Review recent Scout search results",
+      "query": "TeamCymruScoutSearch | where TimeGenerated > ago(7d) | project TimeGenerated, ip, country_codes, event_count, query"
+    },
+    {
+      "description": "Review IP enrichment records includes open ports and PDNS",
+      "query": "TeamCymruScoutIPDetails | where TimeGenerated > ago(7d) | project TimeGenerated, ip, as_name, net_name, sections"
+    }
+  ],
+  "dataTypes": [
+    {
+      "name": "TeamCymruScoutUsage",
+      "lastDataReceivedQuery": "TeamCymruScoutUsage | take 1"
+    },
+    {
+      "name": "TeamCymruScoutSearch",
+      "lastDataReceivedQuery": "TeamCymruScoutSearch | take 1"
+    },
+    {
+      "name": "TeamCymruScoutIPDetails",
+      "lastDataReceivedQuery": "TeamCymruScoutIPDetails | take 1"
+    },
+    {
+      "name": "TeamCymruScoutFoundation",
+      "lastDataReceivedQuery": "TeamCymruScoutFoundation | take 1"
+    }
+  ],
+  "connectivityCriterias": [
+    {
+      "type": "IsConnectedQuery",
+      "value": "TeamCymruScoutUsage | take 1"
+    }
+  ],
+  "availability": {
+    "status": 1,
+    "isPreview": false
+  },
+  "customConnector": {
+    "kind": "apiPoller",
+    "description": "The connector uses Team Cymru Scout's API key authentication model (Authorization: Token: <api_key>). It polls the Scout API at an interval and ingests records from /api/scout/usage, /api/scout/search, /api/scout/ip/{ip}/details, and /api/scout/ip/foundation.",
+    "baseUrl": "https://scout.cymru.com/api",
+    "authentication": {
+      "type": "APIKey",
+      "headerName": "Authorization",
+      "prefix": "Token:",
+      "required": true
+    },
+    "endpoints": [
+      {
+        "name": "usage",
+        "method": "GET",
+        "path": "/api/scout/usage",
+        "responseJsonPath": "$",
+        "tableName": "TeamCymruScoutUsage"
+      },
+      {
+        "name": "search",
+        "method": "GET",
+        "path": "/api/scout/search",
+        "responseJsonPath": "$.ips[*]",
+        "tableName": "TeamCymruScoutSearch",
+        "queryParamRequired": [
+          "query"
+        ]
+      },
+      {
+        "name": "ipDetails",
+        "method": "GET",
+        "path": "/api/scout/ip/{ip}/details",
+        "responseJsonPath": "$",
+        "tableName": "TeamCymruScoutIPDetails",
+        "pathParamRequired": [
+          "ip"
+        ]
+      },
+      {
+        "name": "foundation",
+        "method": "GET",
+        "path": "/api/scout/ip/foundation",
+        "responseJsonPath": "$.data[*]",
+        "tableName": "TeamCymruScoutFoundation",
+        "queryParamRequired": [
+          "ips"
+        ]
+      }
+    ],
+    "polling": {
+      "usageIntervalMinutes": 60,
+      "ipInventoryIntervalHours": 24,
+      "defaultWindowDays": 30,
+      "notes": "The Scout API omits date parameters unless explicitly required. By default, it returns data for the last 30 days."
+    }
+  },
+  "settings": [
+    {
+      "name": "apiKey",
+      "type": "encryptedstring",
+      "defaultValue": "",
+      "description": "The Team Cymru Scout API key issued during account setup. Use the format Authorization: Token: <api_key>."
+    },
+    {
+      "name": "baseUrl",
+      "type": "string",
+      "defaultValue": "https://scout.cymru.com/api",
+      "description": "Hostname and path for the Scout API. This can vary by deployment."
+    },
+    {
+      "name": "query",
+      "type": "string",
+      "defaultValue": "ip=93.184.216.34",
+      "description": "Default Scout Query Language expression for the search poller."
+    },
+    {
+      "name": "lookbackDays",
+      "type": "string",
+      "defaultValue": "30",
+      "description": "Number of days of historical data to request from Scout when the API default is not used."
+    }
+  ]
+}

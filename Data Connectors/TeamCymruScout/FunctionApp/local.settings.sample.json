@@ -1,0 +1,14 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "python",
+    "SCOUT_BASE_URL": "https://scout.cymru.com/api",
+    "SCOUT_API_KEY": "<replace-with-your-api-key>",
+    "SCOUT_QUERY": "ip=93.184.216.34",
+    "DCE_URI": "https://<your-dce-name>.<region>.ingest.monitor.azure.com",
+    "DCR_IMMUTABLE_ID": "<dcr-immmutable-id>",
+    "SCOUT_LOOKBACK_DAYS": "30",
+    "MAX_IP_DETAILS_PER_RUN": "10"
+  }
+}
